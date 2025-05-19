@@ -1,0 +1,91 @@
+# app.R
+library(shiny)
+library(bslib)       # for theming
+library(randomForest)
+
+# Load model & scaling parameters
+model <- readRDS("models/stress_model.rds")
+scaling_params <- readRDS("models/scaling_params.rds")
+means <- scaling_params$means
+sds   <- scaling_params$sds
+
+# Recommendation logic
+get_recommendation <- function(stress_level) {
+  lvl <- as.numeric(as.character(stress_level))
+  if (lvl <= 3) {
+    "You're doing great! Keep up balanced sleep, exercise, and hydration. 😊"
+  } else if (lvl <= 6) {
+    "Light meditation and daily activity can help—reduce caffeine too. 😌"
+  } else if (lvl <= 8) {
+    "High stress—try deep breaths, limit screen time, seek social support. 🧘"
+  } else {
+    "Critical stress detected—consult a counselor and prioritize sleep. ❤"
+  }
+}
+
+# UI with dark theme
+ui <- fluidPage(
+  theme = bs_theme(bootswatch = "darkly", version = 4),
+  tags$head(
+    tags$meta(name = "viewport", content = "width=device-width, initial-scale=1")  # Mobile-friendly
+  ),
+  titlePanel("🧠 MindEase: Stress Prediction"),
+  
+  fluidRow(
+    column(
+      width = 12, 
+      p("Enter your details below and click Predict")
+    )
+  ),
+  
+  fluidRow(
+    column(
+      width = 12, md = 4,
+      wellPanel(
+        numericInput("age",       "Age",                    value = 30, min = 10, max = 100),
+        numericInput("sleep",     "Sleep Hours",            value = 7,  min = 0,  max = 24),
+        numericInput("caffeine",  "Caffeine Intake (mg/day)", value = 200, min = 0),
+        numericInput("activity",  "Physical Activity (hrs/week)", value = 3, min = 0),
+        numericInput("heartrate","Heart Rate (bpm)",        value = 70,  min = 30, max = 200),
+        numericInput("breathing", "Breathing Rate (breaths/min)", value = 16, min = 5, max = 40),
+        actionButton("predict", "🔍 Predict Stress", class = "btn-primary btn-block")
+      )
+    ),
+    column(
+      width = 12, md = 8,
+      verbatimTextOutput("result", placeholder = TRUE)
+    )
+  ),
+  
+  fluidRow(
+    column(width = 12, align = "center",
+      tags$hr(),
+      tags$small("Built by Team MindEase ")
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  observeEvent(input$predict, {
+    new_data <- data.frame(
+      Age                          = input$age,
+      Sleep.Hours                  = input$sleep,
+      Caffeine.Intake..mg.day.     = input$caffeine,
+      Physical.Activity..hrs.week. = input$activity,
+      Heart.Rate..bpm.             = input$heartrate,
+      Breathing.Rate..breaths.min. = input$breathing
+    )
+    scaled  <- as.data.frame(scale(new_data, center = means, scale = sds))
+    pred    <- predict(model, scaled)
+    rec     <- get_recommendation(pred)
+    
+    output$result <- renderText({
+      paste0("Predicted Stress Level: ", pred, "\n\nRecommendation:\n", rec)
+    })
+  })
+}
+
+# Launch
+shinyApp(ui, server)
+ ye le shreya poora code
