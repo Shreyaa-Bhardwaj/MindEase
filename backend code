@@ -1,4 +1,3 @@
-# 1. Load packages
 library(tidyverse)
 library(caret)
 library(xgboost)
@@ -8,35 +7,75 @@ library(ggplot2)
 library(pROC)
 library(reshape2)
 
-# 2. Load and clean data
-file_path <- file.choose()
 data <- read.csv(file_path)
 
 colnames(data)[which(names(data) == "Stress_Category")] <- "Stress_Level"
 data <- na.omit(data)
 data <- data %>% mutate_if(is.character, as.factor)
 
-# 3. Drop weak columns (optional tuning step)
+target <- as.factor(data$Stress_Level)
+
+data_for_plot <- data
+data_for_plot$Stress_Level <- target
+num_cols <- sapply(data_for_plot, is.numeric)
+num_features <- names(data_for_plot)[num_cols]
+
+for (col in head(num_features, 3)) {
+  print(
+    ggplot(data_for_plot, aes(x = Stress_Level, y = .data[[col]], fill = Stress_Level)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(title = paste("Boxplot of", col, "by Stress Level"),
+           x = "Stress Level", y = col)
+  )
+}
+
+stress_HL <- filter(data_for_plot, Stress_Level %in% c("High", "Low"))
+
+for (col in num_features) {
+  high_vals <- stress_HL[[col]][stress_HL$Stress_Level == "High"]
+  low_vals  <- stress_HL[[col]][stress_HL$Stress_Level == "Low"]
+  t_test_result <- t.test(high_vals, low_vals)
+  cat(paste("\nT-test for", col, ": p-value =", round(t_test_result$p.value, 4)))
+}
+
+
+z_scores <- scale(data_for_plot[, num_cols])
+z_scores_df <- as.data.frame(z_scores)
+outlier_count <- apply(z_scores_df, 2, function(col) sum(abs(col) > 3))
+cat("\n\nOutliers (|z| > 3) per feature:\n")
+print(outlier_count)
+
+
+cor_matrix <- cor(data[, num_cols])
+cor_melt <- melt(cor_matrix)
+
+ggplot(cor_melt, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "🔗 Correlation Heatmap of Numeric Features", x = "", y = "")
+
+
 data <- data %>% select(-Occupation, -Recent.Major.Life.Event, -Medication)
 
-# 4. Encode factors
-target <- as.factor(data$Stress_Level)
-data$Stress_Level <- NULL
 
-# One-hot encode
+data$Stress_Level <- NULL
 data_matrix <- model.matrix(~ ., data = data)[, -1]
 
-# 5. Combine with labels for SMOTE
+
 data_full <- data.frame(data_matrix, label = target)
 
-# 6. Apply multi-class SMOTE
+
 set.seed(123)
 smote_result <- SMOTE(data_full[, -ncol(data_full)], data_full$label, K = 5)
 balanced_data <- smote_result$data
 balanced_data$label <- as.factor(balanced_data$class)
 balanced_data$class <- NULL
 
-# 7. Train-test split
+
 set.seed(123)
 train_idx <- createDataPartition(balanced_data$label, p = 0.8, list = FALSE)
 train <- balanced_data[train_idx, ]
@@ -45,7 +84,7 @@ test <- balanced_data[-train_idx, ]
 dtrain <- xgb.DMatrix(data = as.matrix(train[, -ncol(train)]), label = as.numeric(train$label) - 1)
 dtest  <- xgb.DMatrix(data = as.matrix(test[, -ncol(test)]),  label = as.numeric(test$label) - 1)
 
-# 8. Train XGBoost
+
 params <- list(
   objective = "multi:softmax",
   num_class = length(levels(target)),
@@ -58,12 +97,12 @@ params <- list(
 
 model <- xgb.train(params, dtrain, nrounds = 200, watchlist = list(val = dtest), verbose = 0)
 
-# 9. Predict and evaluate
+
 preds <- predict(model, dtest)
 accuracy <- mean(preds == as.numeric(test$label) - 1)
-cat("✅ Final Accuracy after SMOTE + XGBoost:", round(accuracy * 100, 2), "%\n")
+cat("\n✅ Final Accuracy after SMOTE + XGBoost:", round(accuracy * 100, 2), "%\n")
 
-# 10. Add suggestions
+
 label_levels <- levels(target)
 predicted_labels <- factor(label_levels[preds + 1], levels = label_levels)
 
@@ -80,28 +119,25 @@ results <- data.frame(
   Suggestion = suggestions
 )
 
-# Show first few rows
 print(head(results, 10))
 
-# === 11. Confusion Matrix and Stats ===
+
 cat("\n📊 Confusion Matrix and Class Metrics:\n")
 conf_mat <- confusionMatrix(predicted_labels, test$label)
 print(conf_mat)
 
-# Extract F1, Precision, Recall
+
 cat("\n📈 Precision, Recall, and F1-Score:\n")
 metrics <- data.frame(conf_mat$byClass)
 print(metrics[, c("Precision", "Recall", "F1")])
 
-# === 12. Visualization ===
 
-# Bar Plot of Predictions
 ggplot(results, aes(x = Predicted, fill = Predicted)) +
   geom_bar() +
   theme_minimal() +
   labs(title = "Distribution of Predicted Stress Levels", x = "Stress Level", y = "Count")
 
-# Heatmap of Confusion Matrix
+
 cm <- table(results$Actual, results$Predicted)
 cm_df <- as.data.frame(cm)
 colnames(cm_df) <- c("Actual", "Predicted", "Freq")
@@ -113,16 +149,4 @@ ggplot(cm_df, aes(x = Actual, y = Predicted, fill = Freq)) +
   labs(title = "Confusion Matrix Heatmap") +
   theme_minimal()
 
-# === 13. ROC Curve (Optional, use only with softprob output) ===
-# If you switch to "multi:softprob" instead of "softmax", you can uncomment this part:
 
-# prob_preds <- predict(model, dtest)
-# prob_matrix <- matrix(prob_preds, ncol = length(label_levels), byrow = TRUE)
-# colnames(prob_matrix) <- label_levels
-# 
-# for (lvl in label_levels) {
-#   true_bin <- as.numeric(test$label == lvl)
-#   roc_curve <- roc(true_bin, prob_matrix[, lvl])
-#   cat(sprintf("AUC for %s: %.3f\n", lvl, auc(roc_curve)))
-#   plot(roc_curve, main = paste("ROC Curve -", lvl))
-# }
