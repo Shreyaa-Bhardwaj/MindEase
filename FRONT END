@@ -1,15 +1,15 @@
-# app.R
 library(shiny)
-library(bslib)       # for theming
+library(bslib)
 library(randomForest)
+library(plotly)
 
-# Load model & scaling parameters
+
 model <- readRDS("models/stress_model.rds")
 scaling_params <- readRDS("models/scaling_params.rds")
 means <- scaling_params$means
 sds   <- scaling_params$sds
 
-# Recommendation logic
+
 get_recommendation <- function(stress_level) {
   lvl <- as.numeric(as.character(stress_level))
   if (lvl <= 3) {
@@ -23,50 +23,73 @@ get_recommendation <- function(stress_level) {
   }
 }
 
-# UI with dark theme
+
 ui <- fluidPage(
   theme = bs_theme(bootswatch = "darkly", version = 4),
   tags$head(
-    tags$meta(name = "viewport", content = "width=device-width, initial-scale=1")  # Mobile-friendly
+    tags$meta(name = "viewport", content = "width=device-width, initial-scale=1"),
+    tags$link(rel = "stylesheet", href = "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css")
   ),
-  titlePanel("🧠 MindEase: Stress Prediction"),
+  
+  titlePanel(
+    title = div(
+      HTML('<i class="bi bi-heart-pulse-fill"></i>'),
+      strong(" MindEase: AI Stress Predictor")
+    )
+  ),
+
+  br(),
   
   fluidRow(
     column(
-      width = 12, 
-      p("Enter your details below and click Predict")
+      width = 12, align = "center",
+      p("🧘 Enter your health & lifestyle data to get a stress level prediction along with smart recommendations.")
     )
   ),
   
   fluidRow(
     column(
-      width = 12, md = 4,
-      wellPanel(
+      width = 12, md = 4, offset = 1,
+      div(class = "card bg-dark text-light p-3 shadow",
+        h4(HTML('<i class="bi bi-person-fill"></i>'), " Your Information"),
         numericInput("age",       "Age",                    value = 30, min = 10, max = 100),
         numericInput("sleep",     "Sleep Hours",            value = 7,  min = 0,  max = 24),
         numericInput("caffeine",  "Caffeine Intake (mg/day)", value = 200, min = 0),
         numericInput("activity",  "Physical Activity (hrs/week)", value = 3, min = 0),
-        numericInput("heartrate","Heart Rate (bpm)",        value = 70,  min = 30, max = 200),
+        numericInput("heartrate", "Heart Rate (bpm)",        value = 70,  min = 30, max = 200),
         numericInput("breathing", "Breathing Rate (breaths/min)", value = 16, min = 5, max = 40),
-        actionButton("predict", "🔍 Predict Stress", class = "btn-primary btn-block")
+        br(),
+        actionButton("predict", "🔍 Predict My Stress", class = "btn btn-primary btn-block"),
+        actionButton("reset", "♻ Reset Log", class = "btn btn-outline-light btn-block mt-2")
       )
     ),
+    
     column(
-      width = 12, md = 8,
-      verbatimTextOutput("result", placeholder = TRUE)
+      width = 12, md = 6,
+      div(class = "card bg-secondary text-white p-4 shadow", style = "min-height: 420px;",
+        h4(HTML('<i class="bi bi-graph-up-arrow"></i>'), " Prediction & Recommendation"),
+        verbatimTextOutput("result", placeholder = TRUE),
+        br(),
+        plotlyOutput("stress_chart")
+      )
     )
   ),
-  
+
+  br(),
+  hr(),
   fluidRow(
-    column(width = 12, align = "center",
-      tags$hr(),
-      tags$small("Built by Team MindEase ")
+    column(
+      width = 12, align = "center",
+      tags$small("💡 Built by Team MindEase • Powered by R & Shiny")
     )
   )
 )
 
-# Server
+
 server <- function(input, output, session) {
+ 
+  stress_log <- reactiveVal(data.frame(Time = character(), Stress = numeric(), stringsAsFactors = FALSE))
+
   observeEvent(input$predict, {
     new_data <- data.frame(
       Age                          = input$age,
@@ -79,13 +102,36 @@ server <- function(input, output, session) {
     scaled  <- as.data.frame(scale(new_data, center = means, scale = sds))
     pred    <- predict(model, scaled)
     rec     <- get_recommendation(pred)
-    
+
+
+    current_log <- stress_log()
+    new_entry <- data.frame(Time = format(Sys.time(), "%H:%M:%S"), Stress = as.numeric(pred))
+    updated_log <- rbind(current_log, new_entry)
+    stress_log(updated_log)
+
+    # Text output
     output$result <- renderText({
-      paste0("Predicted Stress Level: ", pred, "\n\nRecommendation:\n", rec)
+      paste0("🧠 Predicted Stress Level: ", pred, "\n\n💬 Recommendation:\n", rec)
     })
+
+    # Chart output
+    output$stress_chart <- renderPlotly({
+      log_df <- stress_log()
+      plot_ly(log_df, x = ~Time, y = ~Stress, type = 'scatter', mode = 'lines+markers',
+              line = list(color = 'lightgreen'), marker = list(size = 8)) %>%
+        layout(title = "📊 Stress Over Time",
+               xaxis = list(title = "Time"),
+               yaxis = list(title = "Stress Level", range = c(0, 10)))
+    })
+  })
+
+ 
+  observeEvent(input$reset, {
+    stress_log(data.frame(Time = character(), Stress = numeric(), stringsAsFactors = FALSE))
+    output$result <- renderText({ "" })
+    output$stress_chart <- renderPlotly({ NULL })
   })
 }
 
 # Launch
 shinyApp(ui, server)
- ye le shreya poora code
